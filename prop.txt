@@ -1,5 +1,7 @@
 Neovim: Restore :terminal buffer after restart
 
+
+
 Personal Information:
 Name: Ayush Goyal
 Email: agayush088@gmail.com 
@@ -16,6 +18,38 @@ Mentor: Justin M. Keyes
 Tracking Issue: neovim/neovim/issues/28297
 Abstract: 	
 
-Terminal buffers in Neovim lose all scrollback content when a session ends. While :mksession can reopen term:// URIs, the historical output is gone users see a blank shell instead of their previous work. This project focuses on the implementation of a persistent terminal scrollback by saving terminal buffer state to `stdpath(“state”)/term/`  using msgpack, and restoring it into real terminal buffers via nvim_open_term() + nvim_chan_send(). 
-The restored content lives in proper libvterm scrollback — not a normal buffer — so users can scroll, search, and yank exactly as with a live terminal.
+Terminal buffers in Neovim lose all scrollback content when a session ends. While :mksession can reopen term:// URIs, the output from previously opened terminal is gone users see a blank shell instead of their previous work. This project focuses on the implementation of a persistent terminal scrollback by saving terminal buffer state to `stdpath(“state”)/term/`  using msgpack, and restoring it into real terminal buffers via nvim_open_term()+nvim_chan_send(). 
+The restored content lives in proper libvterm scrollback not a normal buffer so users can scroll, search, and yank exactly as with a live terminal.
+
 Phase 2 moves the serialization to C for full-fidelity color/attribute preservation by reading VTermScreenCell data directly from sb_buffer[].
+
+
+Problem Statement 
+	When a user runs :mksession and later restores via nvim -S Session.vim: 
+Normal Buffers  → Fully Restored 
+Terminal buffers → A new term:// buffer opens, spinning a fresh shell. All previous scrollback is gone 
+	Why does this matters? 
+	In Neovim, when you open a terminal using :terminal, it creates a terminal buffer.
+	You
+Run Commands
+Get output (logs, builds, errors, etc.)
+Scroll back to see history
+	But if you see there’s still a gap which needs to be solved 
+All that terminal output (scrollback) is lost
+Even if you restore session with :mksession, you only get a fresh terminal and no history 
+
+| Feature | Normal Buffer | Your Approach |
+|---------|---------------|---------------|
+| Scrollback --  | No | Yes |
+| ANSI colors -- | No | Yes |
+| Buffer History -- | No | Yes |
+| Server Logs -- | No | Yes |
+
+
+When developers use the :terminal feature for things like seeing build results, running tests, checking logs, or working with SSH and REPLs, losing that terminal context when Neovim restarts is a real pain. It means they have to go back and run those commands all over again and try to remember exactly how their workflow was set up. 
+"Similar to undo/swap/backup directories, we might want a ~/.local/state/nvim/term/ directory. Could be useful for re-implementing :shell." – #28297
+
+
+What cannot be restored
+The process itself — the underlying PTY job is gone. We restore the visual state, not the running process.
+Environment variables, sub-shells, virtualenvs — these require plugin-level handling. Our job is to provide the infrastructure.
