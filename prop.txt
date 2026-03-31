@@ -1,0 +1,21 @@
+Neovim: Restore :terminal buffer after restart
+
+Personal Information:
+Name: Ayush Goyal
+Email: agayush088@gmail.com 
+Github: github.com/agayushh
+Website: ayushg.live
+LinkedIn: www.linkedin.com/in/-ayushgoyal/
+
+Project Information:
+Organization Name: Neovim
+Project: Restore :terminal buffers after restart
+Project Duration: 175 hours 
+Difficulty: Medium
+Mentor: Justin M. Keyes
+Tracking Issue: neovim/neovim/issues/28297
+Abstract: 	
+
+Terminal buffers in Neovim lose all scrollback content when a session ends. While :mksession can reopen term:// URIs, the historical output is gone users see a blank shell instead of their previous work. This project focuses on the implementation of a persistent terminal scrollback by saving terminal buffer state to `stdpath(“state”)/term/`  using msgpack, and restoring it into real terminal buffers via nvim_open_term() + nvim_chan_send(). 
+The restored content lives in proper libvterm scrollback — not a normal buffer — so users can scroll, search, and yank exactly as with a live terminal.
+Phase 2 moves the serialization to C for full-fidelity color/attribute preservation by reading VTermScreenCell data directly from sb_buffer[].
