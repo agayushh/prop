@@ -53,3 +53,40 @@ When developers use the :terminal feature for things like seeing build results, 
 What cannot be restored
 The process itself — the underlying PTY job is gone. We restore the visual state, not the running process.
 Environment variables, sub-shells, virtualenvs — these require plugin-level handling. Our job is to provide the infrastructure.
+
+
+Why nvim_open_term() + nvim_chan_send() instead of writing lines into a buffer?
+
+This approach is necessary because it is the only way to restore content into a real terminal scrollback in Neovim. A terminal buffer in Neovim is fundamentally different from a normal buffer, as it is backed by libvterm.
+
+The function nvim_open_term() creates a virtual terminal instance that is not connected to an external process but still behaves like a terminal emulator. Data can then be fed into this terminal using nvim_chan_send(), which sends input directly into the libvterm engine.
+
+As the data flows through libvterm, it is interpreted as real terminal input, updating the screen and populating the internal scrollback buffer (sb_buffer[]). This process preserves terminal semantics such as ANSI color rendering, cursor movement, and overall terminal behavior.
+
+In contrast, directly writing lines using nvim_buf_set_lines() only inserts plain text into a regular buffer (e.g., buftype=nofile). This approach cannot reproduce terminal behavior and results in a static view that lacks proper scrollback, formatting, and interactivity.
+
+Therefore, using nvim_open_term() together with nvim_chan_send() ensures that the restored content behaves identically to a real terminal, supporting scrolling, searching, and yanking while maintaining full terminal semantics.
+
+
+.4.3 Storage format
+
+Location: stdpath("state")/term/ as mentioned in the discussion
+
+Format: msgpack native to Neovim
+
+Schema:
+`{
+  version: 1,
+  uri: "term:///home/user//12345:bash",  -- original term:// buffer name
+  cwd: "/home/user/project",
+  cols: 80,
+  rows: 24,
+  timestamp: 1711800000,
+  lines: ["$ make", "Building...", "Done.", ...],
+  -- Phase 2 additions:
+  cells: [                    -- VTermScreenCell data per row
+    [{char: "B", width: 1, bold: true, fg: [255,0,0], bg: [-1,-1,-1]}, ...],
+    ...
+  ]
+}`
+
