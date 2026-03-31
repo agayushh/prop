@@ -61,8 +61,8 @@ Yes
 When developers use the :terminal feature for things like seeing build results, running tests, checking logs, or working with SSH and REPLs, losing that terminal context when Neovim restarts disrupts the developer workflow. It means they have to go back and run those commands all over again and try to remember exactly how their workflow was set up. 
 "Similar to undo/swap/backup directories, we might want a ~/.local/state/nvim/term/ directory. Could be useful for re-implementing :shell." – #28297
 What cannot be restored?
-The process itself — the underlying PTY job is gone. We restore the visual state, not the running process.
-Environment variables, sub-shells, virtualenvs — these require plugin-level handling. Our job is to provide the infrastructure.
+The process itself    the underlying PTY job is gone. We restore the visual state, not the running process.
+Environment variables, sub-shells, virtualenvs    these require plugin-level handling. Our job is to provide the infrastructure.
 
 Approach to the problem 
 
@@ -70,7 +70,7 @@ The parallel branch Process Screen Buffer → Store Cell Data shows Phase 2 (C-l
 
 This is the exact nvim_open_term() → nvim_chan_send() → libvterm → sb_buffer[] pipeline 
 
-Phase 1 Approach (Lua-level MVP)
+    5.1 - Phase 1 Approach (Lua-level MVP)
 During :mksession, for each active terminal buffer in Neovim, I will extract all visible lines using nvim_buf_get_lines(buf, 0, -1, false). This captures the textual content currently displayed, including scrollback mirrored into the buffer. These lines will be bundled with relevant metadata such as terminal URI, working directory, dimensions (cols/rows), and a timestamp into a Lua table.
 The data will then be serialized using vim.mpack.encode(), leveraging msgpack (which is already native to Neovim via ShaDa and RPC). The serialized output will be written to stdpath("state")/term/<hash>.mpack. Additionally, a Lua restore hook (e.g., vim.terminal._restore_scrollback(...)) will be injected into the generated :Session.vim, ensuring that restoration is triggered automatically when the session is sourced.
 On session restore (nvim -S Session.vim), Neovim will first recreate terminal buffers using the existing term:// mechanism, which spawns fresh shell instances. Immediately after, the injected Lua restore function will execute: it reads the stored msgpack file, decodes it, and initializes a terminal instance using nvim_open_term(buf, {}). The saved output is then replayed via nvim_chan_send(chan, data), allowing the content to pass through libvterm and populate the internal scrollback buffer (sb_buffer[]). This ensures that the restored buffer behaves like a real terminal, supporting scrolling, searching (/), and yanking (y).
@@ -89,9 +89,8 @@ Add tests to verify scrollback persistence on session restore and ensure no beha
 Documentation (runtime/doc/terminal.txt, runtime/doc/options.txt)
 Update help docs to describe terminal scrollback persistence and its integration with sessionoptions.
 
-Phase 2 Approach
-
- In this phase, instead of relying on nvim_buf_get_lines() (which only captures plain text), the implementation will directly access the terminal scrollback stored inside libvterm at the C level. The scrollback is maintained in the sb_buffer[], which is an array of ScrollbackLine structures. Each ScrollbackLine contains multiple VTermScreenCell entries representing individual cells on the terminal screen.
+5.2 - Phase 2 Approach
+In this phase, instead of relying on nvim_buf_get_lines() (which only captures plain text), the implementation will directly access the terminal scrollback stored inside libvterm at the C level. The scrollback is maintained in the sb_buffer[], which is an array of ScrollbackLine structures. Each ScrollbackLine contains multiple VTermScreenCell entries representing individual cells on the terminal screen.
 Each VTermScreenCell stores detailed information about a character, including:
 The character itself (schar)
 Width (to support wide/CJK characters)
@@ -122,15 +121,11 @@ The function nvim_open_term() creates a virtual terminal instance that is not co
 As the data flows through libvterm, it is interpreted as real terminal input, updating the screen and populating the internal scrollback buffer (sb_buffer[]). This process preserves terminal semantics such as ANSI color rendering, cursor movement, and overall terminal behavior.
 In contrast, directly writing lines using nvim_buf_set_lines() only inserts plain text into a regular buffer (e.g., buftype=nofile). This approach cannot reproduce terminal behavior and results in a static view that lacks proper scrollback, formatting, and interactivity.
 Therefore, using nvim_open_term() together with nvim_chan_send() ensures that the restored content behaves identically to a real terminal, supporting scrolling, searching, and yanking while maintaining full terminal semantics.
-
-
-4. Storage format
+6. Storage format
 
 Location: stdpath("state")/term/ as mentioned in the discussion
 
 Format: msgpack native to Neovim
-
-
 Schema:
 `{
   version: 1,
@@ -146,28 +141,26 @@ Schema:
     ...
   ]
 }`
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+7. Prototype
+Repository: agayushh/nvim-terminal-persistence
+What it demonstrates:
+ Saving terminal scrollback using nvim_buf_get_lines() → vim.mpack.encode() → stdpath("state")/term/*.mpack
+   Restoring content into a real buftype=terminal buffer via nvim_open_term() + nvim_chan_send()
+   Automatic persistence on TermClose (similar to undo/swap files, requiring no manual action)
+   Batch save and restore of multiple terminal buffers
+   Session file cleanup with a configurable limit on stored states
+   Visual indicator ([Restored from session]) to distinguish restored terminals from live processes
+What it validates:
+The nvim_open_term() + nvim_chan_send() pipeline correctly reconstructs scrollback through libvterm
+msgpack-based serialization and deserialization works reliably for terminal content
+Using stdpath("state")/term/ as a storage location is practical and aligns with Neovim conventions
+8. Why I’m the Right Person for This Project
+I have been actively working with Neovim and exploring its internals, particularly around terminal buffers and session management. While working on this project, I didn’t just study the idea theoretically  I built a working prototype that implements terminal scrollback persistence using nvim_open_term() and nvim_chan_send(), which helped me understand how libvterm-backed buffers behave differently from normal buffers.
+Merged PR: fix ui2orrect buffer reference in msg:start_timer()  Found a bug where start_timer() was checking ui.bufs.msg instead of the captured buf
+Working Prototype Built: I didn’t just write a proposal, I built the core solution.
+agayushh/nvim-terminal-persistence — An end-to-end implementation of terminal scrollback persistence using nvim_open_term() + nvim_chan_send() + msgpack + stdpath("state")/term/. The key technical insight that nvim_open_term() creates a real libvterm-backed buffer and nvim_chan_send() populates actual scrollback is validated and working.
+Other Open Source Contributions:
+afhverjuekki/tolvera#46 — Restructured optional dependencies in a Python project.
 Weekly Timeline
 
 
@@ -177,27 +170,46 @@ Deliverables
 
 
 Bonding with mentor and explaining the approach
-- Deep dive into sketchbook codebase
-- Understand more Examples
 
 
-| Week | Task | Hours | Deliverables |
-|------|------|-------|--------------|
-| Week 1 | Environment Setup + Lua Integration Foundation | 22 | Build Neovim from source, run full test suite, understand the build system. Deep-read src/nvim/ex_session.c — trace makeopens() end-to-end. Deep-read runtime/lua/vim/terminal.lua — understand terminal config exposure to Lua. Move prototype logic from agayushh/nvim-terminal-persistence into runtime/lua/vim/terminal.lua as M._save_scrollback() and M._restore_scrollback() | Lua functions callable via :lua vim.terminal._save_scrollback() and :lua vim.terminal._restore_scrollback() working inside Neovim's tree |
-| Week 2 | :mksession Hook + End-to-End Session Flow | 22 | Modify makeopens() in src/nvim/ex_session.c to emit Lua functions into Session.vim (gated by kOptSsopFlagTerminal). Test the full cycle manually: :mksession → quit → nvim -S Session.vim → terminal with scrollback appears. Handle edge case: same terminal displayed in multiple windows | End-to-end :mksession → restore works with terminal scrollback |
-| Week 3 | Edge Cases + Auto-save | 22 | Handle edge cases: Empty terminal, very large scrollback, multiple terminals in splits/tabs, terminal in alternate screen mode. Implement auto-save on TermClose via autocmd. Implement cleanup: cap stored files (oldest-first deletion) | Robust Phase 1 that handles all real-world scenarios |
-| Week 4 | Tests + PR Submission (Midpoint) | 22 | Write functional tests in test/functional/ex_cmds/mksession_spec.lua. Write unit tests for mpack encode/decode round-trip. Update documentation: runtime/doc/terminal.txt and runtime/doc/options.txt | Phase 1 PR submitted for review. Fully working, tested, documented Lua-level implementation. |
-| Week 5 | C-level Serialization: Save Side | 22 | Study term_sb_push() and term_sb_pop() in src/nvim/terminal.c. Study VTermScreenCell struct. Implement terminal_save_scrollback() in src/nvim/terminal.c to serialize cell data (colors/attrs) into msgpack. Write unit tests for serialization | C-level save function that captures full cell data including colors/attrs |
-| Week 6 | C-level Restore: ANSI SGR Reconstruction | 22 | Implement cells_to_ansi(): Walk cells, track attributes, emit ANSI SGR sequences for attribute changes. Feed reconstructed stream through nvim_chan_send(). Test with colored output | Color-accurate restore working end-to-end |
-| Week 7 | Wire C Into Pipeline + Integration Testing | 22 | Replace Phase 1's save path with Phase 2's terminal_save_scrollback() in the :mksession hook. Keep Phase 1 Lua restore as fallback (for backward compatibility). Comprehensive integration tests in test/functional/terminal/scrollback_spec.lua (color, wide chars, mixed attributes, performance). Handle edge cases: no scrollback, altscreen | Full C-level pipeline integrated and tested |
-| Week 8 | Documentation + Polish + Final PR | 21 | Update documentation: runtime/doc/terminal.txt, runtime/doc/options.txt, add :help terminal-persistence. Address all code review feedback from Phase 1 and Phase 2 PRs. Final round of testing and code cleanup | All PRs addressed, documentation complete, ready for merge |
+- Neovim setup
+- Deep study of src/nvim/terminal.c
+- Deep study of src/nvim/ex_session.c
+
+
+Week 1
+Environment Setup + Lua Integration Foundation  \\- Build Neovim from source, run full test suite, understand the build system \\- Deep-read src/nvim/ex_session.c    trace makeopens() end-to-end \\- Deep-read runtime/lua/vim/terminal.lua    understand terminal config exposure to Lua \\- Move prototype logic from agayushh/nvim-terminal-persistence into runtime/lua/vim/terminal.lua as M._save_scrollback() and M._restore_scrollback()
+Lua functions callable via :lua vim.terminal._save_scrollback() and :lua vim.terminal._restore_scrollback() working inside Neovim's tree
+Week 2
+:mksession Hook + End-to-End Session Flow   \\- Modify makeopens() in src/nvim/ex_session.c to emit Lua functions into Session.vim (gated by kOptSsopFlagTerminal) \\- Test the full cycle manually: :mksession → quit → nvim -S Session.vim → terminal with scrollback appears \\- Handle edge case: same terminal displayed in multiple windows
+End-to-end :mksession → restore works with terminal scrollback
+Week 3
+Edge Cases + Auto-save   \\- Handle edge cases: Empty terminal, very large scrollback, multiple terminals in splits/tabs, terminal in alternate screen mode \\- Implement auto-save on TermClose via autocmd \\- Implement cleanup: cap stored files (oldest-first deletion)
+Robust Phase 1 that handles all real-world scenarios
+Week 4
+Tests + PR Submission (Midpoint)   \\- Write functional tests in test/functional/ex_cmds/mksession_spec.lua \\- Write unit tests for mpack encode/decode round-trip \\- Update documentation: runtime/doc/terminal.txt and runtime/doc/options.txt
+Phase 1 PR submitted for review. Fully working, tested, documented Lua-level implementation.
+Week 5
+C-level Serialization: Save Side   \\- Study term_sb_push() and term_sb_pop() in src/nvim/terminal.c \\- Study VTermScreenCell struct \\- Implement terminal_save_scrollback() in src/nvim/terminal.c to serialize cell data (colors/attrs) into msgpack \\- Write unit tests for serialization
+C-level save function that captures full cell data including colors/attrs
+Week 6
+C-level Restore: ANSI SGR Reconstruction   \\- Implement cells_to_ansi(): Walk cells, track attributes, emit ANSI SGR sequences for attribute changes \\- Feed reconstructed stream through nvim_chan_send() \\- Test with colored output
+Color-accurate restore working end-to-end
+Week 7
+Wire C Into Pipeline + Integration Testing   \\- Replace Phase 1's save path with Phase 2's terminal_save_scrollback() in the :mksession hook \\- Keep Phase 1 Lua restore as fallback (for backward compatibility) \\- Comprehensive integration tests in test/functional/terminal/scrollback_spec.lua (color, wide chars, mixed attributes, performance) \\- Handle edge cases: no scrollback, altscreen
+Full C-level pipeline integrated and tested
+Week 8
+Documentation + Polish + Final PR (21 hrs) \\- Update documentation: runtime/doc/terminal.txt, runtime/doc/options.txt, add :help terminal-persistence \\- Address all code review feedback from Phase 1 and Phase 2 PRs \\- Final round of testing and code cleanup
+All PRs addressed, documentation complete, ready for merge
 
 
 
 Possible Stretch Goals
-Migration of existing Tölvera examples - Allowing users to import existing Tölvera examples into their sketchbook via a few CLI commands.
+Compression (zlib) for large scrollback files
+File permissions (0600) for scrollback containing sensitive data
+Preserve OSC 133 shell prompt marks through save/restore cycle
 
 Other commitments 
-As of now, no other work is aligned during this summer. 
+No other commitments this summer. Full 22 hours/week dedicated to this project.
 
  
